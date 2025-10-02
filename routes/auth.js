@@ -249,66 +249,40 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
 
     console.log('🔍 Searching for user with query:', query);
 
-    try {
-      // استخدام timeout أقصر وإعدادات أكثر صرامة
-      let user = await User.findOne({ $or: query })
-        .maxTimeMS(5000) // 5 ثوانٍ فقط
-        .lean(); // استخدام lean للحصول على أداء أفضل
+    // تبسيط عمليات قاعدة البيانات
+    let user = await User.findOne({ $or: query });
 
-      if (!user) {
-        console.log('👤 Creating new user...');
-        user = await User.create({
-          phone: phoneNumber || undefined,
-          email: email || undefined,
-          name: `User_${Date.now()}`,
-          password: crypto.randomBytes(12).toString('hex'),
-          isVerified: true,
-        });
-        console.log('✅ New user created:', user._id);
-      } else {
-        console.log('👤 User found, updating verification status...');
-        // بدلاً من save(), استخدم updateOne للأداء الأفضل
-        await User.updateOne(
-          { _id: user._id }, 
-          { isVerified: true }
-        ).maxTimeMS(3000);
-        
-        // إعادة جلب البيانات المحدثة
-        user = await User.findById(user._id).lean().maxTimeMS(3000);
-        console.log('✅ User verification updated:', user._id);
-      }
-
-      const token = getSignedJwtToken(user._id);
-
-      return res.status(200).json({
-        success: true,
-        message: 'OTP verified successfully',
-        token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-        },
+    if (!user) {
+      console.log('👤 Creating new user...');
+      user = await User.create({
+        phone: phoneNumber || undefined,
+        email: email || undefined,
+        name: `User_${Date.now()}`,
+        password: crypto.randomBytes(12).toString('hex'),
+        isVerified: true,
       });
-
-    } catch (dbError) {
-      console.error('❌ Database operation failed:', dbError.message);
-      
-      // في حالة فشل قاعدة البيانات، نعيد استجابة مؤقتة
-      return res.status(200).json({
-        success: true,
-        message: 'OTP verified successfully (temporary session)',
-        token: 'temp_token_' + Date.now(), // توكن مؤقت
-        user: {
-          id: 'temp_' + Date.now(),
-          name: 'User',
-          email: email || null,
-          phone: phoneNumber || null,
-        },
-        warning: 'Database connection issue - using temporary session'
-      });
+      console.log('✅ New user created:', user._id);
+    } else {
+      console.log('👤 User found, updating verification status...');
+      user.isVerified = true;
+      await user.save();
+      console.log('✅ User verification updated:', user._id);
     }
+
+    const token = getSignedJwtToken(user._id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+      },
+    });
+
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
     return res.status(500).json({ success: false, message: 'Failed to verify OTP: ' + error.message });

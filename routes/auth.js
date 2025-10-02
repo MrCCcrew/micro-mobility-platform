@@ -111,7 +111,9 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
       // حفظ OTP في الذاكرة المؤقتة
       otpStorage.set(email, { otp, expiryTime });
   
-      // إرسال الإيميل عبر SendGrid Template (بدون رابط التفعيل)
+      // إرسال الإيميل عبر SendGrid Template مع رابط التفعيل
+      const activationLink = `${process.env.ACTIVATION_LINK_BASE || 'https://scooters.modern-bns.com'}/api/auth/activate?email=${encodeURIComponent(email)}&code=${otp}`;
+      
       const msg = {
         to: email,
         from: process.env.EMAIL_FROM,
@@ -121,7 +123,8 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
           twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
           otp: otp,
           code: otp,
-          email: email
+          email: email,
+          activation_link: activationLink
         },
       };
   
@@ -466,6 +469,125 @@ router.post('/complete-profile', async (req, res) => {
     });
   }
 });
+// @desc    Activate account via email link
+// @route   GET /api/auth/activate
+// @access  Public
+router.get('/activate', async (req, res) => {
+  try {
+    const { email, code } = req.query;
+
+    if (!email || !code) {
+      return res.status(400).send(`
+        <html>
+          <head><title>خطأ في التفعيل</title></head>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h2>رابط التفعيل غير صحيح</h2>
+            <p>يرجى التحقق من الرابط والمحاولة مرة أخرى</p>
+          </body>
+        </html>
+      `);
+    }
+
+    // التحقق من OTP المخزن
+    const rec = otpStorage.get(email);
+    if (!rec || rec.otp !== code || Date.now() > rec.expiryTime) {
+      return res.status(400).send(`
+        <html>
+          <head><title>انتهت صلاحية الرابط</title></head>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h2>انتهت صلاحية رابط التفعيل</h2>
+            <p>يرجى طلب رمز تفعيل جديد من التطبيق</p>
+          </body>
+        </html>
+      `);
+    }
+
+    // حذف OTP بعد النجاح
+    otpStorage.delete(email);
+
+    // البحث عن المستخدم أو إنشاؤه
+    let user = await User.findOne({ email });
+    
+    if (!user) {
+      user = await User.create({
+        email: email,
+        phone: `+temp${Date.now()}`, // رقم مؤقت لتجنب خطأ التحقق
+        name: `User_${Date.now()}`,
+        password: crypto.randomBytes(12).toString('hex'),
+        isVerified: true,
+      });
+    } else {
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // توليد JWT
+    const token = getSignedJwtToken(user._id);
+    const deepLinkScheme = process.env.APP_DEEP_LINK_SCHEME || 'com.anonymous.ctscooter';
+
+    // عرض صفحة النجاح مع زر فتح التطبيق
+    res.send(`
+      <html>
+        <head>
+          <title>تم تفعيل الحساب بنجاح</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: Arial; text-align: center; padding: 20px; background: #f5f5f5;">
+          <div style="max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h2 style="color: #4CAF50; margin-bottom: 20px;">✅ تم تفعيل حسابك بنجاح!</h2>
+            <p style="color: #666; margin-bottom: 30px;">يمكنك الآن الدخول إلى التطبيق والاستمتاع بخدماتنا</p>
+            
+            <button onclick="openApp()" style="
+              background: #4CAF50; 
+              color: white; 
+              border: none; 
+              padding: 15px 30px; 
+              font-size: 16px; 
+              border-radius: 5px; 
+              cursor: pointer; 
+              margin-bottom: 20px;
+              width: 100%;
+            ">
+              🚀 الدخول إلى التطبيق الآن
+            </button>
+            
+            <p style="font-size: 12px; color: #999;">
+              إذا لم يفتح التطبيق تلقائياً، يرجى فتحه يدوياً
+            </p>
+          </div>
+
+          <script>
+            function openApp() {
+              const deepLink = '${deepLinkScheme}://auth?token=${token}';
+              window.location.href = deepLink;
+              
+              // إظهار رسالة بعد محاولة فتح التطبيق
+              setTimeout(() => {
+                document.body.innerHTML += '<div style="position: fixed; top: 0; left: 0; right: 0; background: #4CAF50; color: white; padding: 10px; text-align: center;">تم إرسال الطلب لفتح التطبيق...</div>';
+              }, 1000);
+            }
+            
+            // محاولة فتح التطبيق تلقائياً عند تحميل الصفحة
+            setTimeout(openApp, 2000);
+          </script>
+        </body>
+      </html>
+    `);
+
+  } catch (error) {
+    console.error('❌ Activation error:', error);
+    res.status(500).send(`
+      <html>
+        <head><title>خطأ في الخادم</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h2>حدث خطأ في الخادم</h2>
+          <p>يرجى المحاولة مرة أخرى لاحقاً</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
 // إزالة هذا الكود بالكامل من نهاية الملف:
 // router.get('/activate', async (req, res) => {
 // ... كل الكود الخاص بالتفعيل

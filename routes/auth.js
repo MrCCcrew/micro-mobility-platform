@@ -254,13 +254,25 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
 
     if (!user) {
       console.log('👤 Creating new user...');
-      user = await User.create({
-        phone: phoneNumber || undefined,
-        email: email || undefined,
+      
+      // إنشاء بيانات المستخدم بناءً على طريقة التفعيل
+      const userData = {
         name: `User_${Date.now()}`,
         password: crypto.randomBytes(12).toString('hex'),
         isVerified: true,
-      });
+      };
+
+      if (method === 'phone') {
+        // التفعيل بالهاتف
+        userData.phone = phoneNumber;
+      } else if (method === 'email') {
+        // التفعيل بالإيميل
+        userData.email = email;
+        // إنشاء رقم هاتف مؤقت فريد لتجنب خطأ التحقق المطلوب
+        userData.phone = `+temp${Date.now()}`;
+      }
+
+      user = await User.create(userData);
       console.log('✅ New user created:', user._id);
     } else {
       console.log('👤 User found, updating verification status...');

@@ -104,78 +104,25 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
         });
       }
 
-      // إنشاء OTP عشوائي للإيميل
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
-  
-      // حفظ OTP في الذاكرة المؤقتة
-      otpStorage.set(email, { otp, expiryTime });
-  
-      // إرسال الإيميل عبر SendGrid Template مع رابط التفعيل
-      const activationLink = `${process.env.ACTIVATION_LINK_BASE || 'https://scooters.modern-bns.com'}/api/auth/activate?email=${encodeURIComponent(email)}&code=${otp}`;
-      
-      const msg = {
-        to: email,
-        from: process.env.EMAIL_FROM,
-        templateId: process.env.SENDGRID_TEMPLATE_ID,
-        dynamic_template_data: {
-          twilio_code: otp,
-          twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
-          otp: otp,
-          code: otp,
-          email: email,
-          activation_link: activationLink
-        },
-      };
-  
-      console.log('📧 Attempting to send email to:', email);
-      console.log('📱 Phone number available for fallback:', phoneNumber ? 'Yes' : 'No');
-  
+      // استخدام Twilio Verify للبريد الإلكتروني
       try {
-        await sgMail.send(msg);
-        console.log('✅ Email sent successfully');
+        const verification = await twilioClient.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verifications
+          .create({ to: email, channel: 'email' });
+
+        console.log('✅ Email OTP sent via Twilio Verify');
         return res.status(200).json({
           success: true,
           message: 'OTP sent via email',
+          sid: verification.sid,
         });
-      } catch (sendGridError) {
-        console.error('❌ SendGrid error:', sendGridError);
-        console.log('🔄 Checking fallback options...');
-        
-        // في حالة فشل SendGrid، نستخدم SMS كبديل إذا كان رقم الهاتف متوفر
-        if (phoneNumber) {
-          console.log('📱 Phone number found, falling back to SMS:', phoneNumber);
-          
-          try {
-            // حذف OTP المخزن للإيميل لأننا سنستخدم Twilio بدلاً منه
-            otpStorage.delete(email);
-            
-            const verification = await twilioClient.verify.v2
-              .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-              .verifications
-              .create({ to: phoneNumber, channel: 'sms' });
-
-            console.log('✅ SMS fallback successful');
-            return res.status(200).json({
-              success: true,
-              message: 'Email service unavailable. OTP sent via SMS instead.',
-              sid: verification.sid,
-              fallbackToSms: true,
-            });
-          } catch (twilioError) {
-            console.error('❌ Twilio fallback error:', twilioError);
-            return res.status(500).json({
-              success: false,
-              message: 'Both email and SMS services failed',
-            });
-          }
-        } else {
-          console.log('❌ No phone number available for fallback');
-          return res.status(500).json({
-            success: false,
-            message: 'Email service unavailable and no phone number provided for fallback',
-          });
-        }
+      } catch (twilioError) {
+        console.error('❌ Twilio Verify Email error:', twilioError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send email OTP via Twilio Verify',
+        });
       }
     }
 
@@ -200,45 +147,52 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const { phoneNumber, email, otp, method = 'phone', fallbackToSms } = req.body;
+    const { phoneNumber, email, otp, method = 'phone' } = req.body;
     
-    console.log('🔐 Verify OTP Request:', { method, phoneNumber, email: email ? 'provided' : 'not provided', fallbackToSms });
+    console.log('🔐 Verify OTP Request:', { method, phoneNumber, email: email ? 'provided' : 'not provided' });
 
     let isValid = false;
+    let targetContact = '';
 
-    if (method === 'phone' || fallbackToSms) {
-      // تحقق عبر Twilio Verify
-      const targetPhone = phoneNumber;
-      
-      if (!targetPhone) {
+    if (method === 'phone') {
+      if (!phoneNumber) {
         return res.status(400).json({
           success: false,
           message: 'Phone number is required for SMS verification'
         });
       }
 
-      console.log('📱 Verifying SMS OTP for:', targetPhone);
+      targetContact = phoneNumber;
+      console.log('📱 Verifying SMS OTP for:', targetContact);
       
+    } else if (method === 'email') {
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required for email verification'
+        });
+      }
+
+      targetContact = email;
+      console.log('📧 Verifying email OTP for:', targetContact);
+    }
+
+    // تحقق عبر Twilio Verify (يدعم SMS و Email)
+    try {
       const check = await twilioClient.verify.v2
         .services(process.env.TWILIO_VERIFY_SERVICE_SID)
         .verificationChecks
-        .create({ to: targetPhone, code: otp });
+        .create({ to: targetContact, code: otp });
 
       isValid = check.status === 'approved';
-      console.log('📱 SMS verification result:', isValid);
+      console.log(`${method === 'phone' ? '📱' : '📧'} Verification result:`, isValid);
       
-    } else if (method === 'email') {
-      // تحقق من OTP المخزن (SendGrid Template flow)
-      console.log('📧 Verifying email OTP for:', email);
-      
-      const rec = otpStorage.get(email);
-      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
-        isValid = true;
-        otpStorage.delete(email); // احذف الكود بعد النجاح
-        console.log('📧 Email verification successful');
-      } else {
-        console.log('📧 Email verification failed - invalid or expired OTP');
-      }
+    } catch (twilioError) {
+      console.error('❌ Twilio verification error:', twilioError);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
     }
 
     if (!isValid) {
@@ -250,38 +204,29 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
     if (phoneNumber) query.push({ phone: phoneNumber });
     if (email) query.push({ email });
 
-    console.log('🔍 Searching for user with query:', query);
-
-    // تبسيط عمليات قاعدة البيانات
     let user = await User.findOne({ $or: query });
 
     if (!user) {
-      console.log('👤 Creating new user...');
-      
-      // إنشاء بيانات المستخدم بناءً على طريقة التفعيل
+      // إنشاء مستخدم جديد
       const userData = {
         name: `User_${Date.now()}`,
         password: crypto.randomBytes(12).toString('hex'),
         isVerified: true,
       };
 
-      if (method === 'phone') {
-        // التفعيل بالهاتف
+      // إضافة البيانات حسب الطريقة
+      if (method === 'phone' && phoneNumber) {
         userData.phone = phoneNumber;
-      } else if (method === 'email') {
-        // التفعيل بالإيميل
+      } else if (method === 'email' && email) {
         userData.email = email;
-        // إنشاء رقم هاتف مؤقت فريد لتجنب خطأ التحقق المطلوب
+        // إنشاء رقم هاتف مؤقت للمستخدمين الذين يسجلون بالبريد الإلكتروني فقط
         userData.phone = `+temp${Date.now()}`;
       }
 
       user = await User.create(userData);
-      console.log('✅ New user created:', user._id);
     } else {
-      console.log('👤 User found, updating verification status...');
       user.isVerified = true;
       await user.save();
-      console.log('✅ User verification updated:', user._id);
     }
 
     const token = getSignedJwtToken(user._id);
@@ -297,7 +242,6 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         phone: user.phone,
       },
     });
-
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
     return res.status(500).json({ success: false, message: 'Failed to verify OTP: ' + error.message });

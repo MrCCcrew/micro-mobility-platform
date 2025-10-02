@@ -65,7 +65,6 @@ const verifyOtpValidation = [
    @route  POST /api/auth/send-otp
    @access Public
 -------------------------------------------------- */
-// تعديل بناء رابط التفعيل داخل مسار send-otp
 router.post('/send-otp', sendOtpValidation, async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -112,9 +111,7 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
       // حفظ OTP في الذاكرة المؤقتة
       otpStorage.set(email, { otp, expiryTime });
   
-      // إرسال الإيميل عبر SendGrid Template (استخدم الاسم الصحيح للحقول)
-      const ACTIVATION_LINK_BASE = process.env.ACTIVATION_LINK_BASE || 'https://scooters.modern-bns.com';
-      const activationLink = `${ACTIVATION_LINK_BASE}/api/auth/activate?email=${encodeURIComponent(email)}&code=${encodeURIComponent(otp)}`;
+      // إرسال الإيميل عبر SendGrid Template (بدون رابط التفعيل)
       const msg = {
         to: email,
         from: process.env.EMAIL_FROM,
@@ -124,8 +121,7 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
           twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
           otp: otp,
           code: otp,
-          email: email,
-          activation_link: activationLink
+          email: email
         },
       };
   
@@ -484,74 +480,9 @@ router.post('/complete-profile', async (req, res) => {
     });
   }
 });
+// إزالة هذا الكود بالكامل من نهاية الملف:
+// router.get('/activate', async (req, res) => {
+// ... كل الكود الخاص بالتفعيل
+// });
+
 module.exports = router;
-// إضافة مسار GET /api/auth/activate لعرض صفحة نجاح وتوليد التوكن
-// ملف: routes/auth.js
-// يضيف الميثود التالية:
-router.get('/activate', async (req, res) => {
-  const { email, code } = req.query;
-
-  if (!email || !code) {
-    return res.status(400).send('رابط غير صالح: تنقصه البيانات المطلوبة.');
-  }
-
-  const rec = otpStorage.get(email);
-  const isValid = rec && rec.otp === code && Date.now() < rec.expiryTime;
-  if (!isValid) {
-    return res.status(400).send('الرابط غير صالح أو منتهي الصلاحية.');
-  }
-
-  otpStorage.delete(email);
-
-  // أنشئ/حدّث المستخدم وفعّل حسابه
-  const query = [{ email }];
-  let user = await User.findOne({ $or: query });
-  if (!user) {
-    user = await User.create({
-      email,
-      name: `User_${Date.now()}`,
-      password: crypto.randomBytes(12).toString('hex'),
-      isVerified: true,
-    });
-  } else {
-    await User.updateOne({ _id: user._id }, { isVerified: true });
-    user = await User.findById(user._id);
-  }
-
-  const token = getSignedJwtToken(user._id);
-
-  // إعداد رابط فتح التطبيق (deeplink)
-  const appScheme = process.env.APP_DEEP_LINK_SCHEME || 'com.anonymous.ctscooter';
-  const deepLink = `${appScheme}://auth?token=${encodeURIComponent(token)}`;
-
-  // صفحة نجاح بسيطة
-  const html = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <title>تم تفعيل الحساب</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: Arial, Helvetica, sans-serif; background:#f7f7f9; color:#222; margin:0; }
-    .container { max-width:640px; margin:40px auto; background:#fff; border:1px solid #eee; border-radius:12px; padding:24px; }
-    h1 { font-size:22px; margin:0 0 12px; }
-    p { line-height:1.8; }
-    .button { display:inline-block; padding:14px 28px; background:#ffbe00; color:#000; border-radius:8px; text-decoration:none; font-weight:bold; }
-    .muted { color:#666; font-size:13px; }
-    .box { background:#f5f7fb; border:1px solid #e3e7ef; border-radius:8px; padding:12px; word-break:break-all; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>تم تفعيل حسابك بنجاح ✅</h1>
-    <p>يمكنك الآن الدخول إلى التطبيق مباشرة بدون كتابة رمز التحقق.</p>
-    <p><a class="button" href="${deepLink}">الدخول إلى التطبيق الآن</a></p>
-    <p class="muted">إذا كنت على جهاز كمبيوتر أو لم يُفتح التطبيق تلقائياً، انسخ هذا الرابط وافتحه على هاتفك المثبت عليه التطبيق:</p>
-    <div class="box">${deepLink}</div>
-    <p class="muted">ملاحظة: إذا تعذّر فتح التطبيق، يمكنك دائماً استخدام الرمز الذي وصل إلى بريدك لكتابته في التطبيق.</p>
-  </div>
-</body>
-</html>`;
-
-  res.status(200).send(html);
-});

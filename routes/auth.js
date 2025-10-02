@@ -478,11 +478,70 @@ router.get('/activate', async (req, res) => {
 
     if (!email || !code) {
       return res.status(400).send(`
-        <html>
-          <head><title>خطأ في التفعيل</title></head>
-          <body style="font-family: Arial; text-align: center; padding: 50px;">
-            <h2>رابط التفعيل غير صحيح</h2>
-            <p>يرجى التحقق من الرابط والمحاولة مرة أخرى</p>
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>خطأ في التفعيل</title>
+            <style>
+              body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .container {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                text-align: center;
+                max-width: 400px;
+                width: 100%;
+              }
+              .error-icon {
+                font-size: 64px;
+                margin-bottom: 20px;
+              }
+              h2 {
+                color: #e74c3c;
+                margin-bottom: 15px;
+                font-size: 24px;
+              }
+              p {
+                color: #666;
+                line-height: 1.6;
+                margin-bottom: 30px;
+              }
+              .back-button {
+                background: #3498db;
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 25px;
+                font-size: 16px;
+                cursor: pointer;
+                text-decoration: none;
+                display: inline-block;
+                transition: background 0.3s;
+              }
+              .back-button:hover {
+                background: #2980b9;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="error-icon">❌</div>
+              <h2>رابط التفعيل غير صحيح</h2>
+              <p>يرجى التحقق من الرابط والمحاولة مرة أخرى، أو طلب رمز تفعيل جديد من التطبيق</p>
+              <a href="#" class="back-button" onclick="window.close()">إغلاق النافذة</a>
+            </div>
           </body>
         </html>
       `);
@@ -492,11 +551,70 @@ router.get('/activate', async (req, res) => {
     const rec = otpStorage.get(email);
     if (!rec || rec.otp !== code || Date.now() > rec.expiryTime) {
       return res.status(400).send(`
-        <html>
-          <head><title>انتهت صلاحية الرابط</title></head>
-          <body style="font-family: Arial; text-align: center; padding: 50px;">
-            <h2>انتهت صلاحية رابط التفعيل</h2>
-            <p>يرجى طلب رمز تفعيل جديد من التطبيق</p>
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>انتهت صلاحية الرابط</title>
+            <style>
+              body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .container {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                text-align: center;
+                max-width: 400px;
+                width: 100%;
+              }
+              .warning-icon {
+                font-size: 64px;
+                margin-bottom: 20px;
+              }
+              h2 {
+                color: #f39c12;
+                margin-bottom: 15px;
+                font-size: 24px;
+              }
+              p {
+                color: #666;
+                line-height: 1.6;
+                margin-bottom: 30px;
+              }
+              .retry-button {
+                background: #f39c12;
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 25px;
+                font-size: 16px;
+                cursor: pointer;
+                text-decoration: none;
+                display: inline-block;
+                transition: background 0.3s;
+              }
+              .retry-button:hover {
+                background: #e67e22;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="warning-icon">⏰</div>
+              <h2>انتهت صلاحية رابط التفعيل</h2>
+              <p>انتهت صلاحية رابط التفعيل. يرجى فتح التطبيق وطلب رمز تفعيل جديد</p>
+              <a href="#" class="retry-button" onclick="window.close()">إغلاق النافذة</a>
+            </div>
           </body>
         </html>
       `);
@@ -525,50 +643,306 @@ router.get('/activate', async (req, res) => {
     const token = getSignedJwtToken(user._id);
     const deepLinkScheme = process.env.APP_DEEP_LINK_SCHEME || 'com.anonymous.ctscooter';
 
-    // عرض صفحة النجاح مع زر فتح التطبيق
+    // عرض صفحة التفعيل التفاعلية
     res.send(`
-      <html>
+      <!DOCTYPE html>
+      <html lang="ar" dir="rtl">
         <head>
-          <title>تم تفعيل الحساب بنجاح</title>
+          <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: Arial; text-align: center; padding: 20px; background: #f5f5f5;">
-          <div style="max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #4CAF50; margin-bottom: 20px;">✅ تم تفعيل حسابك بنجاح!</h2>
-            <p style="color: #666; margin-bottom: 30px;">يمكنك الآن الدخول إلى التطبيق والاستمتاع بخدماتنا</p>
+          <title>تم تفعيل الحساب بنجاح</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
             
-            <button onclick="openApp()" style="
-              background: #4CAF50; 
-              color: white; 
-              border: none; 
-              padding: 15px 30px; 
-              font-size: 16px; 
-              border-radius: 5px; 
-              cursor: pointer; 
-              margin-bottom: 20px;
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 20px;
+            }
+            
+            .activation-container {
+              background: white;
+              padding: 40px;
+              border-radius: 20px;
+              box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+              text-align: center;
+              max-width: 450px;
               width: 100%;
-            ">
-              🚀 الدخول إلى التطبيق الآن
+              position: relative;
+              overflow: hidden;
+            }
+            
+            .activation-container::before {
+              content: '';
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              height: 5px;
+              background: linear-gradient(90deg, #4CAF50, #45a049);
+            }
+            
+            .success-animation {
+              width: 80px;
+              height: 80px;
+              margin: 0 auto 30px;
+              background: linear-gradient(135deg, #4CAF50, #45a049);
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 40px;
+              color: white;
+              animation: bounce 0.6s ease-out;
+            }
+            
+            @keyframes bounce {
+              0% { transform: scale(0); }
+              50% { transform: scale(1.1); }
+              100% { transform: scale(1); }
+            }
+            
+            .title {
+              color: #2c3e50;
+              font-size: 28px;
+              font-weight: bold;
+              margin-bottom: 15px;
+            }
+            
+            .subtitle {
+              color: #7f8c8d;
+              font-size: 16px;
+              line-height: 1.6;
+              margin-bottom: 30px;
+            }
+            
+            .user-info {
+              background: #f8f9fa;
+              padding: 20px;
+              border-radius: 10px;
+              margin-bottom: 30px;
+              border-left: 4px solid #4CAF50;
+            }
+            
+            .user-email {
+              color: #2c3e50;
+              font-weight: 600;
+              font-size: 16px;
+            }
+            
+            .steps-container {
+              text-align: right;
+              margin-bottom: 30px;
+            }
+            
+            .step {
+              display: flex;
+              align-items: center;
+              margin-bottom: 15px;
+              padding: 10px;
+              background: #f8f9fa;
+              border-radius: 8px;
+            }
+            
+            .step-number {
+              background: #4CAF50;
+              color: white;
+              width: 25px;
+              height: 25px;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 12px;
+              font-weight: bold;
+              margin-left: 15px;
+              flex-shrink: 0;
+            }
+            
+            .step-text {
+              color: #2c3e50;
+              font-size: 14px;
+            }
+            
+            .open-app-button {
+              background: linear-gradient(135deg, #4CAF50, #45a049);
+              color: white;
+              border: none;
+              padding: 18px 40px;
+              font-size: 18px;
+              font-weight: bold;
+              border-radius: 50px;
+              cursor: pointer;
+              width: 100%;
+              margin-bottom: 20px;
+              transition: all 0.3s ease;
+              box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            }
+            
+            .open-app-button:hover {
+              transform: translateY(-2px);
+              box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+            }
+            
+            .open-app-button:active {
+              transform: translateY(0);
+            }
+            
+            .status-message {
+              background: #e8f5e8;
+              color: #2e7d32;
+              padding: 15px;
+              border-radius: 8px;
+              margin-top: 20px;
+              font-size: 14px;
+              display: none;
+            }
+            
+            .help-text {
+              color: #95a5a6;
+              font-size: 13px;
+              line-height: 1.5;
+              margin-top: 20px;
+            }
+            
+            .loading-spinner {
+              display: none;
+              width: 20px;
+              height: 20px;
+              border: 2px solid #ffffff;
+              border-top: 2px solid transparent;
+              border-radius: 50%;
+              animation: spin 1s linear infinite;
+              margin-right: 10px;
+            }
+            
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            
+            .countdown {
+              color: #4CAF50;
+              font-weight: bold;
+              font-size: 18px;
+              margin: 20px 0;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="activation-container">
+            <div class="success-animation">✅</div>
+            
+            <h1 class="title">تم تفعيل حسابك بنجاح!</h1>
+            <p class="subtitle">مرحباً بك في تطبيق CTScooter. حسابك الآن جاهز للاستخدام</p>
+            
+            <div class="user-info">
+              <div class="user-email">${email}</div>
+            </div>
+            
+            <div class="steps-container">
+              <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-text">تم التحقق من بريدك الإلكتروني بنجاح</div>
+              </div>
+              <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-text">تم إنشاء حسابك وتفعيله</div>
+              </div>
+              <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-text">اضغط على الزر أدناه لفتح التطبيق</div>
+              </div>
+            </div>
+            
+            <div class="countdown" id="countdown">سيتم فتح التطبيق تلقائياً خلال <span id="timer">5</span> ثوانٍ</div>
+            
+            <button class="open-app-button" onclick="openApp()" id="openButton">
+              <div class="loading-spinner" id="spinner"></div>
+              🚀 فتح التطبيق الآن
             </button>
             
-            <p style="font-size: 12px; color: #999;">
-              إذا لم يفتح التطبيق تلقائياً، يرجى فتحه يدوياً
+            <div class="status-message" id="statusMessage">
+              جاري محاولة فتح التطبيق...
+            </div>
+            
+            <p class="help-text">
+              إذا لم يفتح التطبيق تلقائياً، تأكد من تثبيت التطبيق على جهازك أو افتحه يدوياً
             </p>
           </div>
 
           <script>
-            function openApp() {
-              const deepLink = '${deepLinkScheme}://auth?token=${token}';
-              window.location.href = deepLink;
+            let countdownTimer = 5;
+            let countdownInterval;
+            
+            function updateCountdown() {
+              const timerElement = document.getElementById('timer');
+              const countdownElement = document.getElementById('countdown');
               
-              // إظهار رسالة بعد محاولة فتح التطبيق
-              setTimeout(() => {
-                document.body.innerHTML += '<div style="position: fixed; top: 0; left: 0; right: 0; background: #4CAF50; color: white; padding: 10px; text-align: center;">تم إرسال الطلب لفتح التطبيق...</div>';
-              }, 1000);
+              if (countdownTimer > 0) {
+                timerElement.textContent = countdownTimer;
+                countdownTimer--;
+              } else {
+                clearInterval(countdownInterval);
+                countdownElement.style.display = 'none';
+                openApp();
+              }
             }
             
-            // محاولة فتح التطبيق تلقائياً عند تحميل الصفحة
-            setTimeout(openApp, 2000);
+            function openApp() {
+              const button = document.getElementById('openButton');
+              const spinner = document.getElementById('spinner');
+              const statusMessage = document.getElementById('statusMessage');
+              const countdownElement = document.getElementById('countdown');
+              
+              // إيقاف العد التنازلي
+              clearInterval(countdownInterval);
+              countdownElement.style.display = 'none';
+              
+              // إظهار حالة التحميل
+              spinner.style.display = 'inline-block';
+              button.innerHTML = '<div class="loading-spinner"></div>جاري فتح التطبيق...';
+              button.disabled = true;
+              statusMessage.style.display = 'block';
+              
+              // محاولة فتح التطبيق
+              const deepLink = '${deepLinkScheme}://auth?token=${token}';
+              console.log('Attempting to open:', deepLink);
+              
+              // محاولة فتح التطبيق
+              window.location.href = deepLink;
+              
+              // إظهار رسالة نجاح بعد ثانيتين
+              setTimeout(() => {
+                statusMessage.innerHTML = '✅ تم إرسال الطلب لفتح التطبيق بنجاح!';
+                statusMessage.style.background = '#e8f5e8';
+                statusMessage.style.color = '#2e7d32';
+                
+                button.innerHTML = '✅ تم إرسال الطلب';
+                button.style.background = '#4CAF50';
+                
+                // إعادة تعيين الزر بعد 3 ثوانٍ
+                setTimeout(() => {
+                  button.innerHTML = '🔄 إعادة المحاولة';
+                  button.disabled = false;
+                  button.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
+                }, 3000);
+              }, 2000);
+            }
+            
+            // بدء العد التنازلي
+            countdownInterval = setInterval(updateCountdown, 1000);
+            
+            // محاولة فتح التطبيق عند تحميل الصفحة (بعد 5 ثوانٍ)
+            // setTimeout(openApp, 5000);
           </script>
         </body>
       </html>
@@ -581,16 +955,11 @@ router.get('/activate', async (req, res) => {
         <head><title>خطأ في الخادم</title></head>
         <body style="font-family: Arial; text-align: center; padding: 50px;">
           <h2>حدث خطأ في الخادم</h2>
-          <p>يرجى المحاولة مرة أخرى لاحقاً</p>
+          <p>نعتذر، حدث خطأ أثناء معالجة طلبك. يرجى المحاولة مرة أخرى لاحقاً</p>
         </body>
       </html>
     `);
   }
 });
-
-// إزالة هذا الكود بالكامل من نهاية الملف:
-// router.get('/activate', async (req, res) => {
-// ... كل الكود الخاص بالتفعيل
-// });
 
 module.exports = router;

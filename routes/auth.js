@@ -107,24 +107,33 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
       // إنشاء OTP عشوائي للإيميل
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
-
+  
       // حفظ OTP في الذاكرة المؤقتة
       otpStorage.set(email, { otp, expiryTime });
-
-      // إرسال الإيميل عبر SendGrid Template
+  
+      // إرسال الإيميل عبر SendGrid Template (استخدم الاسم الصحيح للحقول)
+      const ACTIVATION_LINK_BASE = process.env.ACTIVATION_LINK_BASE || 'https://scooters.modern-bns.com';
+      const activationLink = `${ACTIVATION_LINK_BASE}/verify-email?email=${encodeURIComponent(email)}&code=${encodeURIComponent(otp)}`;
+  
       const msg = {
         to: email,
         from: process.env.EMAIL_FROM,
         templateId: process.env.SENDGRID_TEMPLATE_ID,
-        dynamicTemplateData: {
+        dynamic_template_data: {
+          // أسماء المتغيرات المطابقة للقالب
+          twilio_code: otp,
+          twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
+          // توافق إضافي إذا كان القالب يستخدم أسماء أخرى
           otp: otp,
+          code: otp,
           email: email,
+          activation_link: activationLink
         },
       };
-
+  
       console.log('📧 Attempting to send email to:', email);
       console.log('📱 Phone number available for fallback:', phoneNumber ? 'Yes' : 'No');
-
+  
       try {
         await sgMail.send(msg);
         console.log('✅ Email sent successfully');

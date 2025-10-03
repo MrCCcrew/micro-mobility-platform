@@ -208,36 +208,50 @@ router.post('/complete-profile', completeProfileValidation, async (req, res) => 
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // تحقق من عدم وجود إيميل مكرر
-    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
-    if (existingUser) {
-      // إذا كان البريد الإلكتروني موجود، قم بتسجيل الدخول التلقائي
-      // تحديث بيانات المستخدم الموجود بالاسم الجديد إذا لم يكن مكتملاً
-      if (!existingUser.name || existingUser.name.startsWith('User_')) {
-        existingUser.name = `${firstName} ${lastName}`;
-        await existingUser.save();
-      }
+    // تحقق من عدم وجود إيميل مكرر (إذا كان مختلف عن الإيميل الحالي)
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+      if (existingUser) {
+        // إذا كان البريد الإلكتروني موجود، قم بتسجيل الدخول التلقائي
+        // تحديث بيانات المستخدم الموجود بالاسم الجديد إذا لم يكن مكتملاً
+        if (!existingUser.name || existingUser.name.startsWith('User_')) {
+          existingUser.name = `${firstName} ${lastName}`;
+          await existingUser.save();
+        }
 
-      // إنشاء توكن جديد للمستخدم الموجود
-      const newToken = getSignedJwtToken(existingUser._id);
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Login successful - existing account found',
-        token: newToken,
-        user: {
-          id: existingUser._id,
-          name: existingUser.name,
-          email: existingUser.email,
-          phone: existingUser.phone,
-          profileComplete: true,
-        },
-        autoLogin: true // إشارة للفرونت إند أن هذا تسجيل دخول تلقائي
+        // إنشاء توكن جديد للمستخدم الموجود
+        const newToken = getSignedJwtToken(existingUser._id);
+        
+        return res.status(200).json({
+          success: true,
+          message: 'Login successful - existing account found',
+          token: newToken,
+          user: {
+            id: existingUser._id,
+            name: existingUser.name,
+            email: existingUser.email,
+            phone: existingUser.phone,
+            profileComplete: true,
+          },
+          autoLogin: true // إشارة للفرونت إند أن هذا تسجيل دخول تلقائي
+        });
+      }
+    }
+
+    // تحديث بيانات المستخدم الحالي
+    user.name = `${firstName} ${lastName}`;
+    if (email) {
+      user.email = email;
+    }
+    
+    // التأكد من أن رقم الهاتف موجود (يجب أن يكون موجود من مرحلة التحقق من OTP)
+    if (!user.phone) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Phone number is missing. Please verify your phone number again.' 
       });
     }
 
-    user.name = `${firstName} ${lastName}`;
-    user.email = email;
     await user.save();
 
     return res.status(200).json({

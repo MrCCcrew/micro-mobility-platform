@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const Admin = require('../models/Admin');
 
 const User = require('../models/User');
-const { getSignedJwtToken } = require('../middleware/auth');
+const { getSignedJwtToken, protect } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -340,6 +340,83 @@ router.post('/login', [
     res.status(500).json({
       success: false,
       message: 'Server error during login'
+    });
+  }
+});
+
+// @desc    Get current user profile
+// @route   GET /api/auth/me
+// @access  Private
+router.get('/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: user
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching profile'
+    });
+  }
+});
+
+// @desc    Update user profile (auth route)
+// @route   PUT /api/auth/profile
+// @access  Private
+router.put('/profile', protect, [
+  body('name').optional().trim().isLength({ min: 2, max: 50 }).withMessage('Name must be between 2-50 characters'),
+  body('phone').optional().isMobilePhone().withMessage('Please enter a valid phone number'),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const updateData = {};
+    const { name, phone, dateOfBirth } = req.body;
+
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: user
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number already exists'
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update profile'
     });
   }
 });

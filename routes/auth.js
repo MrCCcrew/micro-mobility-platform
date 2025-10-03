@@ -211,7 +211,29 @@ router.post('/complete-profile', completeProfileValidation, async (req, res) => 
     // تحقق من عدم وجود إيميل مكرر
     const existingUser = await User.findOne({ email, _id: { $ne: userId } });
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Email already exists' });
+      // إذا كان البريد الإلكتروني موجود، قم بتسجيل الدخول التلقائي
+      // تحديث بيانات المستخدم الموجود بالاسم الجديد إذا لم يكن مكتملاً
+      if (!existingUser.name || existingUser.name.startsWith('User_')) {
+        existingUser.name = `${firstName} ${lastName}`;
+        await existingUser.save();
+      }
+
+      // إنشاء توكن جديد للمستخدم الموجود
+      const newToken = getSignedJwtToken(existingUser._id);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Login successful - existing account found',
+        token: newToken,
+        user: {
+          id: existingUser._id,
+          name: existingUser.name,
+          email: existingUser.email,
+          phone: existingUser.phone,
+          profileComplete: true,
+        },
+        autoLogin: true // إشارة للفرونت إند أن هذا تسجيل دخول تلقائي
+      });
     }
 
     user.name = `${firstName} ${lastName}`;

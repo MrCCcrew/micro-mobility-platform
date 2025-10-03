@@ -218,22 +218,19 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         });
       }
 
-      console.log('📧 Verifying email OTP via Twilio for:', email);
+      console.log('📧 Verifying email OTP for:', email);
       
-      try {
-        const check = await twilioClient.verify.v2
-          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-          .verificationChecks
-          .create({ to: email, code: otp });
-
-        isValid = check.status === 'approved';
-        console.log('📧 Email verification result:', isValid);
-      } catch (twilioError) {
-        console.error('❌ Twilio email verification error:', twilioError);
-        return res.status(400).json({
-          success: false,
-          message: 'Failed to verify email OTP: ' + twilioError.message
-        });
+      // تحقق من OTP المخزن (SendGrid flow)
+      const rec = otpStorage.get(email);
+      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
+        isValid = true;
+        otpStorage.delete(email); // احذف الكود بعد النجاح
+        console.log('📧 Email verification successful');
+      } else {
+        console.log('📧 Email verification failed - invalid or expired OTP');
+        console.log('📧 Stored OTP:', rec ? rec.otp : 'none');
+        console.log('📧 Provided OTP:', otp);
+        console.log('📧 Is expired:', rec ? Date.now() > rec.expiryTime : 'no record');
       }
     }
 

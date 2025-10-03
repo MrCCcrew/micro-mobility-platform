@@ -104,41 +104,26 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
         });
       }
 
-      // إنشاء OTP عشوائي للإيميل
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
-  
-      // حفظ OTP في الذاكرة المؤقتة
-      otpStorage.set(email, { otp, expiryTime });
-  
-      // إرسال الإيميل عبر SendGrid Template
-      const msg = {
-        to: email,
-        from: process.env.EMAIL_FROM,
-        templateId: process.env.SENDGRID_TEMPLATE_ID,
-        dynamic_template_data: {
-          twilio_code: otp,
-          twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
-          otp: otp,
-          code: otp,
-          email: email
-        },
-      };
-  
-      console.log('📧 Attempting to send email to:', email);
-  
+      console.log('📧 Sending email OTP via Twilio to:', email);
+
       try {
-        await sgMail.send(msg);
-        console.log('✅ Email sent successfully');
+        // إرسال OTP عبر Twilio Verify للبريد الإلكتروني
+        const verification = await twilioClient.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verifications
+          .create({ to: email, channel: 'email' });
+
+        console.log('✅ Email OTP sent successfully via Twilio');
         return res.status(200).json({
           success: true,
           message: 'OTP sent via email',
+          sid: verification.sid,
         });
-      } catch (sendGridError) {
-        console.error('❌ SendGrid error:', sendGridError);
+      } catch (twilioError) {
+        console.error('❌ Twilio email error:', twilioError);
         return res.status(500).json({
           success: false,
-          message: 'Failed to send email OTP',
+          message: 'Failed to send email OTP via Twilio',
         });
       }
     }
@@ -196,16 +181,19 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         });
       }
 
-      // تحقق من OTP المخزن (SendGrid flow)
-      console.log('📧 Verifying email OTP for:', email);
+      console.log('📧 Verifying email OTP via Twilio for:', email);
       
-      const rec = otpStorage.get(email);
-      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
-        isValid = true;
-        otpStorage.delete(email); // احذف الكود بعد النجاح
-        console.log('📧 Email verification successful');
-      } else {
-        console.log('📧 Email verification failed - invalid or expired OTP');
+      try {
+        const check = await twilioClient.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verificationChecks
+          .create({ to: email, code: otp });
+
+        isValid = check.status === 'approved';
+        console.log('📧 Email verification result:', isValid);
+      } catch (twilioError) {
+        console.error('❌ Twilio email verification error:', twilioError);
+        isValid = false;
       }
     }
 

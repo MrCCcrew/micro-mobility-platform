@@ -104,24 +104,41 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
         });
       }
 
-      // استخدام Twilio Verify للبريد الإلكتروني
+      // إنشاء OTP عشوائي للإيميل
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
+  
+      // حفظ OTP في الذاكرة المؤقتة
+      otpStorage.set(email, { otp, expiryTime });
+  
+      // إرسال الإيميل عبر SendGrid Template
+      const msg = {
+        to: email,
+        from: process.env.EMAIL_FROM,
+        templateId: process.env.SENDGRID_TEMPLATE_ID,
+        dynamic_template_data: {
+          twilio_code: otp,
+          twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
+          otp: otp,
+          code: otp,
+          email: email
+        },
+      };
+  
+      console.log('📧 Attempting to send email to:', email);
+  
       try {
-        const verification = await twilioClient.verify.v2
-          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-          .verifications
-          .create({ to: email, channel: 'email' });
-
-        console.log('✅ Email OTP sent via Twilio Verify');
+        await sgMail.send(msg);
+        console.log('✅ Email sent successfully');
         return res.status(200).json({
           success: true,
           message: 'OTP sent via email',
-          sid: verification.sid,
         });
-      } catch (twilioError) {
-        console.error('❌ Twilio Verify Email error:', twilioError);
+      } catch (sendGridError) {
+        console.error('❌ SendGrid error:', sendGridError);
         return res.status(500).json({
           success: false,
-          message: 'Failed to send email OTP via Twilio Verify',
+          message: 'Failed to send email OTP',
         });
       }
     }
@@ -152,18 +169,24 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
     console.log('🔐 Verify OTP Request:', { method, phoneNumber, email: email ? 'provided' : 'not provided' });
 
     let isValid = false;
-    let targetContact = '';
 
     if (method === 'phone') {
       if (!phoneNumber) {
-        return res.status(400).json({
+    return res.status(400).json({
           success: false,
           message: 'Phone number is required for SMS verification'
         });
       }
 
-      targetContact = phoneNumber;
-      console.log('📱 Verifying SMS OTP for:', targetContact);
+      console.log('📱 Verifying SMS OTP for:', phoneNumber);
+      
+      const check = await twilioClient.verify.v2
+        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+        .verificationChecks
+        .create({ to: phoneNumber, code: otp });
+
+      isValid = check.status === 'approved';
+      console.log('📱 SMS verification result:', isValid);
       
     } else if (method === 'email') {
       if (!email) {
@@ -173,26 +196,17 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         });
       }
 
-      targetContact = email;
-      console.log('📧 Verifying email OTP for:', targetContact);
-    }
-
-    // تحقق عبر Twilio Verify (يدعم SMS و Email)
-    try {
-      const check = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verificationChecks
-        .create({ to: targetContact, code: otp });
-
-      isValid = check.status === 'approved';
-      console.log(`${method === 'phone' ? '📱' : '📧'} Verification result:`, isValid);
+      // تحقق من OTP المخزن (SendGrid flow)
+      console.log('📧 Verifying email OTP for:', email);
       
-    } catch (twilioError) {
-      console.error('❌ Twilio verification error:', twilioError);
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired OTP'
-      });
+      const rec = otpStorage.get(email);
+      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
+        isValid = true;
+        otpStorage.delete(email); // احذف الكود بعد النجاح
+        console.log('📧 Email verification successful');
+      } else {
+        console.log('📧 Email verification failed - invalid or expired OTP');
+      }
     }
 
     if (!isValid) {

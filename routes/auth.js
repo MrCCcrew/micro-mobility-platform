@@ -104,26 +104,48 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
         });
       }
 
-      console.log('📧 Sending email OTP via Twilio to:', email);
+      // إنشاء OTP عشوائي للإيميل
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
+  
+      // حفظ OTP في الذاكرة المؤقتة
+      otpStorage.set(email, { otp, expiryTime });
+  
+      console.log('📧 Sending email OTP via SendGrid to:', email);
+      console.log('📧 Generated OTP:', otp);
+
+      // إرسال الإيميل عبر SendGrid Template
+      const msg = {
+        to: email,
+        from: process.env.EMAIL_FROM || 'admin@modern-bns.com',
+        templateId: process.env.SENDGRID_TEMPLATE_ID,
+        dynamic_template_data: {
+          twilio_code: otp,
+          twilio_message: `رمز التحقق الخاص بك هو: ${otp}`,
+          otp: otp,
+          code: otp,
+          email: email
+        },
+      };
 
       try {
-        // إرسال OTP عبر Twilio Verify للبريد الإلكتروني
-        const verification = await twilioClient.verify.v2
-          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-          .verifications
-          .create({ to: email, channel: 'email' });
-
-        console.log('✅ Email OTP sent successfully via Twilio');
+        await sgMail.send(msg);
+        console.log('✅ Email sent successfully via SendGrid');
         return res.status(200).json({
           success: true,
           message: 'OTP sent via email',
-          sid: verification.sid,
+          // في بيئة التطوير فقط، أرسل OTP للاختبار
+          devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined,
         });
-      } catch (twilioError) {
-        console.error('❌ Twilio email error:', twilioError);
+      } catch (sendGridError) {
+        console.error('❌ SendGrid error details:', {
+          message: sendGridError.message,
+          code: sendGridError.code,
+          response: sendGridError.response?.body
+        });
         return res.status(500).json({
           success: false,
-          message: 'Failed to send email OTP via Twilio',
+          message: 'Failed to send email OTP via SendGrid',
         });
       }
     }

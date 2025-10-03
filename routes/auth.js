@@ -33,19 +33,19 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 const otpStorage = new Map();
 
 /* ===========
-   Validators - تم إصلاحها لتعمل مع التطبيق
+   Validators - مبسطة للعمل مع التطبيق
 =========== */
 const sendOtpValidation = [
   body('phoneNumber')
     .notEmpty().withMessage('phoneNumber is required')
-    .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
+    .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9665xxxxxxx)'),
 ];
 
 const verifyOtpValidation = [
   body('otp').notEmpty().withMessage('OTP is required'),
   body('phoneNumber')
     .notEmpty().withMessage('phoneNumber is required')
-    .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
+    .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9665xxxxxxx)'),
 ];
 
 const completeProfileValidation = [
@@ -61,18 +61,52 @@ const completeProfileValidation = [
 -------------------------------------------------- */
 router.post('/send-otp', sendOtpValidation, async (req, res) => {
   try {
+    console.log('📱 Send OTP request received:', req.body);
+    console.log('🌐 Request headers:', req.headers);
+    console.log('🔍 Environment check:', {
+      NODE_ENV: process.env.NODE_ENV,
+      TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'NOT SET',
+      TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID ? 'SET' : 'NOT SET'
+    });
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
+      console.log('❌ Validation errors:', errors.array());
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed', 
+        errors: errors.array() 
+      });
     }
 
     const { phoneNumber } = req.body;
+    console.log('📞 Sending OTP to:', phoneNumber);
+
+    // التحقق من إعدادات Twilio
+    if (!process.env.TWILIO_VERIFY_SERVICE_SID) {
+      console.error('❌ TWILIO_VERIFY_SERVICE_SID is not set');
+      return res.status(500).json({
+        success: false,
+        message: 'Twilio service not configured'
+      });
+    }
+
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      console.error('❌ Twilio credentials not set');
+      return res.status(500).json({
+        success: false,
+        message: 'Twilio credentials not configured'
+      });
+    }
 
     // SMS عبر Twilio Verify فقط
+    console.log('🔄 Attempting to send OTP via Twilio...');
     const verification = await twilioClient.verify.v2
       .services(process.env.TWILIO_VERIFY_SERVICE_SID)
       .verifications
       .create({ to: phoneNumber, channel: 'sms' });
+
+    console.log('✅ OTP sent successfully:', verification.sid);
 
     return res.status(200).json({
       success: true,
@@ -81,9 +115,33 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Send OTP error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      moreInfo: error.moreInfo,
+      stack: error.stack
+    });
+    
+    // معالجة أخطاء Twilio المحددة
+    let errorMessage = 'Failed to send OTP';
+    if (error.code === 20003) {
+      errorMessage = 'Authentication Error - Invalid Twilio credentials';
+    } else if (error.code === 20404) {
+      errorMessage = 'Twilio service not found';
+    } else if (error.code === 21211) {
+      errorMessage = 'Invalid phone number format';
+    } else if (error.code === 21608) {
+      errorMessage = 'Phone number is not verified for trial account';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     return res.status(500).json({
       success: false,
-      message: 'Failed to send OTP: ' + (error?.message || String(error)),
+      message: errorMessage,
+      errorCode: error?.code,
+      errorStatus: error?.status
     });
   }
 });

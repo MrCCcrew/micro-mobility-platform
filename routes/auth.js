@@ -33,31 +33,19 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 const otpStorage = new Map();
 
 /* ===========
-   Validators
+   Validators - تم إصلاحها لتعمل مع التطبيق
 =========== */
 const sendOtpValidation = [
-  body('method').optional().isIn(['phone', 'email']).withMessage('method must be phone or email'),
   body('phoneNumber')
-    .if(body('method').equals('phone'))
     .notEmpty().withMessage('phoneNumber is required')
-    .bail()
     .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
-  body('email')
-    .if(body('method').equals('email'))
-    .isEmail().withMessage('Valid email is required'),
 ];
 
 const verifyOtpValidation = [
-  body('method').optional().isIn(['phone', 'email']).withMessage('method must be phone or email'),
   body('otp').notEmpty().withMessage('OTP is required'),
   body('phoneNumber')
-    .if(body('method').equals('phone'))
     .notEmpty().withMessage('phoneNumber is required')
-    .bail()
     .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
-  body('email')
-    .if(body('method').equals('email'))
-    .isEmail().withMessage('Valid email is required'),
 ];
 
 const completeProfileValidation = [
@@ -67,7 +55,7 @@ const completeProfileValidation = [
 ];
 
 /* -------------------------------------------------
-   @desc   Send OTP (SMS via Verify, Email via SendGrid Template)
+   @desc   Send OTP (SMS via Twilio Verify)
    @route  POST /api/auth/send-otp
    @access Public
 -------------------------------------------------- */
@@ -78,45 +66,18 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const { phoneNumber, email, method = 'phone' } = req.body;
+    const { phoneNumber } = req.body;
 
-    if (method === 'phone') {
-      // SMS عبر Twilio Verify
-      const verification = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verifications
-        .create({ to: phoneNumber, channel: 'sms' });
-
-      return res.status(200).json({
-        success: true,
-        message: 'OTP sent via SMS',
-        sid: verification.sid,
-      });
-    }
-
-    // ===== Email عبر SendGrid Templateك (NOT Twilio Verify Email) =====
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
-    otpStorage.set(email, { otp, expiryTime });
-
-    const msg = {
-      to: email,
-      from: process.env.EMAIL_FROM || 'no-reply@example.com',
-      templateId: process.env.SENDGRID_TEMPLATE_ID, // لازم يكون d-...
-      dynamic_template_data: {
-        // ✅ نفس أسماء المتغيرات الموجودة في القالب بتاعك:
-        twilio_code: otp,
-        twilio_message: `Your verification code is ${otp}`,
-        // تقدر تضيف أي حقول تانية لو القالب بيستخدمها
-      },
-    };
-
-    await sgMail.send(msg);
+    // SMS عبر Twilio Verify فقط
+    const verification = await twilioClient.verify.v2
+      .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications
+      .create({ to: phoneNumber, channel: 'sms' });
 
     return res.status(200).json({
       success: true,
-      message: 'OTP sent via Email (SendGrid Template)',
-      devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+      message: 'OTP sent via SMS',
+      sid: verification.sid,
     });
   } catch (error) {
     console.error('❌ Send OTP error:', error);
@@ -139,42 +100,26 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const { phoneNumber, email, otp, method = 'phone' } = req.body;
+    const { phoneNumber, otp } = req.body;
 
-    let isValid = false;
+    // تحقق عبر Twilio Verify فقط
+    const check = await twilioClient.verify.v2
+      .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verificationChecks
+      .create({ to: phoneNumber, code: otp });
 
-    if (method === 'phone') {
-      // تحقق عبر Twilio Verify
-      const check = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verificationChecks
-        .create({ to: phoneNumber, code: otp });
-
-      isValid = check.status === 'approved';
-    } else {
-      // تحقق من OTP المخزن (SendGrid Template flow)
-      const rec = otpStorage.get(email);
-      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
-        isValid = true;
-        otpStorage.delete(email); // احذف الكود بعد النجاح
-      }
-    }
+    const isValid = check.status === 'approved';
 
     if (!isValid) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }
 
     // ✅ OTP صحيح: أنشئ/حدّث المستخدم
-    const query = [];
-    if (phoneNumber) query.push({ phone: phoneNumber });
-    if (email) query.push({ email });
-
-    let user = await User.findOne({ $or: query });
+    let user = await User.findOne({ phone: phoneNumber });
 
     if (!user) {
       user = await User.create({
-        phone: phoneNumber || undefined,
-        email: email || undefined,
+        phone: phoneNumber,
         name: `User_${Date.now()}`,
         password: crypto.randomBytes(12).toString('hex'),
         isVerified: true,

@@ -35,33 +35,29 @@ const otpStorage = new Map();
 /* ===========
    Validators
 =========== */
+// تبسيط validation للهاتف فقط
 const sendOtpValidation = [
-  body('method').optional().isIn(['phone', 'email']).withMessage('method must be phone or email'),
   body('phoneNumber')
-    .if(body('method').equals('phone'))
     .notEmpty().withMessage('phoneNumber is required')
-    .bail()
     .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
-  body('email')
-    .if(body('method').equals('email'))
-    .isEmail().withMessage('Valid email is required'),
 ];
 
 const verifyOtpValidation = [
-  body('method').optional().isIn(['phone', 'email']).withMessage('method must be phone or email'),
   body('otp').notEmpty().withMessage('OTP is required'),
   body('phoneNumber')
-    .if(body('method').equals('phone'))
     .notEmpty().withMessage('phoneNumber is required')
-    .bail()
     .matches(/^\+\d{6,15}$/).withMessage('phoneNumber must be in E.164 format (e.g. +9655xxxxxxx)'),
-  body('email')
-    .if(body('method').equals('email'))
-    .isEmail().withMessage('Valid email is required'),
+];
+
+// validation لإكمال البيانات
+const completeProfileValidation = [
+  body('firstName').notEmpty().withMessage('First name is required'),
+  body('lastName').notEmpty().withMessage('Last name is required'),
+  body('email').isEmail().withMessage('Valid email is required'),
 ];
 
 /* -------------------------------------------------
-   @desc   Send OTP (SMS via Verify, Email via SendGrid Template)
+   @desc   Send OTP (SMS only via Twilio Verify)
    @route  POST /api/auth/send-otp
    @access Public
 -------------------------------------------------- */
@@ -72,43 +68,18 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const { phoneNumber, email, method = 'phone' } = req.body;
+    const { phoneNumber } = req.body;
 
-    if (method === 'phone') {
-      // SMS عبر Twilio Verify
-      const verification = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verifications
-        .create({ to: phoneNumber, channel: 'sms' });
-
-      return res.status(200).json({
-        success: true,
-        message: 'OTP sent via SMS',
-        sid: verification.sid,
-      });
-    }
-
-    // ===== Email عبر SendGrid Templateك (NOT Twilio Verify Email) =====
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiryTime = Date.now() + 10 * 60 * 1000; // 10 دقائق
-    otpStorage.set(email, { otp, expiryTime });
-
-    const msg = {
-      to: email,
-      from: process.env.EMAIL_FROM || 'admin@modern-bns.com',
-      templateId: process.env.SENDGRID_TEMPLATE_ID,
-      dynamic_template_data: {
-        twilio_code: otp,
-        twilio_message: `Your verification code is ${otp}`,
-      },
-    };
-
-    await sgMail.send(msg);
+    // SMS عبر Twilio Verify فقط
+    const verification = await twilioClient.verify.v2
+      .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications
+      .create({ to: phoneNumber, channel: 'sms' });
 
     return res.status(200).json({
       success: true,
-      message: 'OTP sent via Email (SendGrid Template)',
-      devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+      message: 'OTP sent via SMS',
+      sid: verification.sid,
     });
   } catch (error) {
     console.error('❌ Send OTP error:', error);
@@ -120,7 +91,7 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
 });
 
 /* -------------------------------------------------
-   @desc   Verify OTP
+   @desc   Verify OTP (Phone only)
    @route  POST /api/auth/verify-otp
    @access Public
 -------------------------------------------------- */
@@ -131,67 +102,136 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const { phoneNumber, email, otp, method = 'phone' } = req.body;
+    const { phoneNumber, otp } = req.body;
 
-    let isValid = false;
+    // تحقق عبر Twilio Verify
+    const check = await twilioClient.verify.v2
+      .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verificationChecks
+      .create({ to: phoneNumber, code: otp });
 
-    if (method === 'phone') {
-      // تحقق عبر Twilio Verify
-      const check = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verificationChecks
-        .create({ to: phoneNumber, code: otp });
-
-      isValid = check.status === 'approved';
-    } else {
-      // تحقق من OTP المخزن (SendGrid Template flow)
-      const rec = otpStorage.get(email);
-      if (rec && rec.otp === otp && Date.now() < rec.expiryTime) {
-        isValid = true;
-        otpStorage.delete(email); // احذف الكود بعد النجاح
-      }
-    }
-
-    if (!isValid) {
+    if (check.status !== 'approved') {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }
 
-    // ✅ OTP صحيح: أنشئ/حدّث المستخدم
-    const query = [];
-    if (phoneNumber) query.push({ phone: phoneNumber });
-    if (email) query.push({ email });
+    // ✅ OTP صحيح: تحقق من وجود المستخدم
+    let user = await User.findOne({ phone: phoneNumber });
 
-    let user = await User.findOne({ $or: query });
+    if (user) {
+      // المستخدم موجود ومكتمل البيانات
+      if (user.name && user.email && user.name !== `User_${phoneNumber}`) {
+        user.isVerified = true;
+        await user.save();
 
-    if (!user) {
+        const token = getSignedJwtToken(user._id);
+        return res.status(200).json({
+          success: true,
+          message: 'Login successful',
+          token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            profileComplete: true,
+          },
+        });
+      } else {
+        // المستخدم موجود لكن البيانات غير مكتملة
+        const token = getSignedJwtToken(user._id);
+        return res.status(200).json({
+          success: true,
+          message: 'OTP verified, please complete your profile',
+          token,
+          user: {
+            id: user._id,
+            phone: user.phone,
+            profileComplete: false,
+          },
+        });
+      }
+    } else {
+      // إنشاء مستخدم جديد مؤقت
       user = await User.create({
-        phone: phoneNumber || undefined,
-        email: email || undefined,
-        name: `User_${Date.now()}`,
+        phone: phoneNumber,
+        name: `User_${phoneNumber}`, // اسم مؤقت
         password: crypto.randomBytes(12).toString('hex'),
         isVerified: true,
       });
-    } else {
-      user.isVerified = true;
-      await user.save();
+
+      const token = getSignedJwtToken(user._id);
+      return res.status(200).json({
+        success: true,
+        message: 'OTP verified, please complete your profile',
+        token,
+        user: {
+          id: user._id,
+          phone: user.phone,
+          profileComplete: false,
+        },
+      });
+    }
+  } catch (error) {
+    console.error('❌ Verify OTP error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to verify OTP: ' + error.message });
+  }
+});
+
+/* -------------------------------------------------
+   @desc   Complete Profile (First Name, Last Name, Email)
+   @route  POST /api/auth/complete-profile
+   @access Private (requires token from verify-otp)
+-------------------------------------------------- */
+router.post('/complete-profile', completeProfileValidation, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const token = getSignedJwtToken(user._id);
+    // استخراج التوكن من الهيدر
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+
+    // التحقق من التوكن
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    const { firstName, lastName, email } = req.body;
+
+    // تحديث بيانات المستخدم
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // تحقق من عدم وجود إيميل مكرر
+    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'Email already exists' });
+    }
+
+    user.name = `${firstName} ${lastName}`;
+    user.email = email;
+    await user.save();
 
     return res.status(200).json({
       success: true,
-      message: 'OTP verified successfully',
-      token,
+      message: 'Profile completed successfully',
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
+        profileComplete: true,
       },
     });
   } catch (error) {
-    console.error('❌ Verify OTP error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to verify OTP: ' + error.message });
+    console.error('❌ Complete Profile error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to complete profile: ' + error.message });
   }
 });
 

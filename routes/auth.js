@@ -144,20 +144,27 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
 -------------------------------------------------- */
 router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
   try {
+    console.log('🔐 Verify OTP Request received:', req.body);
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
+      console.log('❌ Validation errors:', errors.array());
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed', 
+        errors: errors.array() 
+      });
     }
 
     const { phoneNumber, email, otp, method = 'phone' } = req.body;
     
-    console.log('🔐 Verify OTP Request:', { method, phoneNumber, email: email ? 'provided' : 'not provided' });
+    console.log('🔐 Verify OTP Request:', { method, phoneNumber, email: email ? 'provided' : 'not provided', otp: otp ? 'provided' : 'missing' });
 
     let isValid = false;
 
     if (method === 'phone') {
       if (!phoneNumber) {
-    return res.status(400).json({
+        return res.status(400).json({
           success: false,
           message: 'Phone number is required for SMS verification'
         });
@@ -165,13 +172,21 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
 
       console.log('📱 Verifying SMS OTP for:', phoneNumber);
       
-      const check = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verificationChecks
-        .create({ to: phoneNumber, code: otp });
+      try {
+        const check = await twilioClient.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verificationChecks
+          .create({ to: phoneNumber, code: otp });
 
-      isValid = check.status === 'approved';
-      console.log('📱 SMS verification result:', isValid);
+        isValid = check.status === 'approved';
+        console.log('📱 SMS verification result:', isValid);
+      } catch (twilioError) {
+        console.error('❌ Twilio SMS verification error:', twilioError);
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to verify SMS OTP: ' + twilioError.message
+        });
+      }
       
     } else if (method === 'email') {
       if (!email) {
@@ -193,7 +208,10 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         console.log('📧 Email verification result:', isValid);
       } catch (twilioError) {
         console.error('❌ Twilio email verification error:', twilioError);
-        isValid = false;
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to verify email OTP: ' + twilioError.message
+        });
       }
     }
 

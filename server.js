@@ -120,6 +120,8 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/rides', require('./routes/rides'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/wallet', require('./routes/wallet')); // إضافة route المحفظة
+app.use('/api/locations', require('./routes/locations'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/webhooks/paypal', require('./routes/paypalWebhook'));
 app.use('/api/locations', require('./routes/locations'));

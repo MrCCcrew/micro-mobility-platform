@@ -14,6 +14,9 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
+// ===================== أساسيات الشبكة =====================
+app.set('trust proxy', 1); // مهم مع Cloudflare/Render للـ rate limit والـ IPs
+
 // ===================== CORS =====================
 const corsOptions = {
   origin: [
@@ -22,7 +25,7 @@ const corsOptions = {
     'http://localhost:19006',
     'https://scooters.modern-bns.com',
     'https://www.scooters.modern-bns.com',
-    'https://api.scooters.modern-bns.com', // ← تمت إضافتها
+    'https://api.scooters.modern-bns.com', // الدومين بتاع الـAPI
     'https://master-bug-lucky-ngrok-free.app',
     /^http:\/\/192\.168\.\d+\.\d+:\d+$/,
     /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/,
@@ -33,6 +36,8 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
 };
 app.use(cors(corsOptions));
+// دعم الـ preflight صراحةً
+app.options('*', cors(corsOptions));
 
 // ================== Security & Parsers ==================
 app.use(helmet({
@@ -44,12 +49,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ================== Rate limiting ==================
+// نطبق على /api و /wallet عشان ندعم الـ alias
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 دقيقة
   max: process.env.NODE_ENV === 'production' ? 100 : 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: 'Too many requests from this IP, please try again later.'
 });
-app.use('/api/', limiter);
+app.use(['/api', '/wallet'], limiter);
 
 // ================== Logging ==================
 app.use(process.env.NODE_ENV === 'development' ? morgan('dev') : morgan('combined'));
@@ -85,6 +93,7 @@ io.on('connection', (socket) => {
 app.set('io', io);
 
 // ================== Health / Diagnostics ==================
+// Health
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
@@ -92,21 +101,20 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV
   });
 });
+app.get('/healthz', (req, res) => res.status(200).send('OK'));
 app.get('/api/health', (req, res) => res.status(200).send('OK-API'));
+app.get('/api/healthz', (req, res) => res.status(200).send('OK-API'));
 
-// اختياري: قائمة بالمسارات للمساعدة في التشخيص
+// قائمة بالمسارات للمساعدة في التشخيص
 app.get('/__routes', (req, res) => {
   const list = [];
-  const walk = (stack) => {
+  const walk = (stack, base = '') => {
     stack.forEach((l) => {
       if (l.route && l.route.path) {
-        Object.keys(l.route.methods).forEach(m => list.push(`${m.toUpperCase()} ${l.route.path}`));
+        Object.keys(l.route.methods).forEach(m => list.push(`${m.toUpperCase()} ${base}${l.route.path}`));
       } else if (l.name === 'router' && l.handle?.stack) {
-        l.handle.stack.forEach((h) => {
-          if (h.route && h.route.path) {
-            Object.keys(h.route.methods).forEach(m => list.push(`${m.toUpperCase()} ${h.route.path}`));
-          }
-        });
+        // nested router
+        walk(l.handle.stack, base);
       }
     });
   };
@@ -114,15 +122,17 @@ app.get('/__routes', (req, res) => {
   res.json(list);
 });
 
-// ================== API Routes (تأكّد أن التسجيل قبل 404) ==================
+// ================== API Routes (قبل 404) ==================
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/rides', require('./routes/rides'));
 app.use('/api/payments', require('./routes/payments'));
 
-// مهم: الراوتر ده أصبح يُركّب على /api/wallet والمسارات داخله نسبية ("/")
-app.use('/api/wallet', require('./routes/wallet'));
+// Wallet routes + alias لتوافق التطبيقات القديمة
+const walletRoutes = require('./routes/wallet');
+app.use('/api/wallet', walletRoutes); // الجديد/الصحيح
+app.use('/wallet', walletRoutes);     // alias للتطبيقات اللي بتطلب بدون /api
 
 app.use('/api/locations', require('./routes/locations'));
 app.use('/api/admin', require('./routes/admin'));
@@ -135,10 +145,10 @@ app.use('/api/map', require('./routes/map'));
 
 // ================== Error handler ==================
 app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.stack);
+  console.error('❌ Error:', err.stack || err);
   res.status(500).json({
     message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    error: process.env.NODE_ENV === 'development' ? (err.message || err) : 'Internal server error'
   });
 });
 

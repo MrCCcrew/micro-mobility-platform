@@ -82,6 +82,12 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
     const { phoneNumber } = req.body;
     console.log('📞 Sending OTP to:', phoneNumber);
 
+    // التحقق من وجود المستخدم مسبقاً
+    const existingUser = await User.findOne({ phone: phoneNumber });
+    const isRegistered = !!existingUser;
+    
+    console.log('👤 User registration status:', { phoneNumber, isRegistered });
+
     // التحقق من إعدادات Twilio
     if (!process.env.TWILIO_VERIFY_SERVICE_SID) {
       console.error('❌ TWILIO_VERIFY_SERVICE_SID is not set');
@@ -110,8 +116,10 @@ router.post('/send-otp', sendOtpValidation, async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'OTP sent via SMS',
+      message: isRegistered ? 'OTP sent for login' : 'OTP sent for registration',
       sid: verification.sid,
+      isRegistered, // إضافة معلومة عن حالة التسجيل
+      userExists: isRegistered
     });
   } catch (error) {
     console.error('❌ Send OTP error:', error);
@@ -174,20 +182,27 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
 
     // ✅ OTP صحيح: أنشئ/حدّث المستخدم
     let user = await User.findOne({ phone: phoneNumber });
+    let isNewUser = false;
 
     if (!user) {
+      // مستخدم جديد
       user = await User.create({
         phone: phoneNumber,
         name: `User_${Date.now()}`,
         password: crypto.randomBytes(12).toString('hex'),
         isVerified: true,
       });
+      isNewUser = true;
     } else {
+      // مستخدم موجود - تحديث حالة التحقق
       user.isVerified = true;
       await user.save();
     }
 
     const token = getSignedJwtToken(user._id);
+
+    // تحديد ما إذا كان الملف الشخصي مكتمل
+    const isProfileComplete = user.name && !user.name.startsWith('User_') && user.email;
 
     return res.status(200).json({
       success: true,
@@ -198,7 +213,12 @@ router.post('/verify-otp', verifyOtpValidation, async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
+        firstName: user.name && !user.name.startsWith('User_') ? user.name.split(' ')[0] : '',
+        lastName: user.name && !user.name.startsWith('User_') ? user.name.split(' ').slice(1).join(' ') : ''
       },
+      isNewUser,
+      isProfileComplete,
+      requiresProfileCompletion: !isProfileComplete
     });
   } catch (error) {
     console.error('❌ Verify OTP error:', error);

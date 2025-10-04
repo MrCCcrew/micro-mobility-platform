@@ -25,7 +25,9 @@ const corsOptions = {
     'http://localhost:19006',
     'https://scooters.modern-bns.com',
     'https://www.scooters.modern-bns.com',
-    'https://api.scooters.modern-bns.com', // الدومين بتاع الـAPI
+    'https://api.scooters.modern-bns.com', 
+    'https://api.scooters.modern-bns.com/api',// الدومين بتاع الـAPI
+    'https://api.scooters.modern-bns.com/api/wallet',// الدومين بتاع الـAPI
     'https://master-bug-lucky-ngrok-free.app',
     /^http:\/\/192\.168\.\d+\.\d+:\d+$/,
     /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/,

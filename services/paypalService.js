@@ -86,8 +86,8 @@ class PayPalService {
           soft_descriptor: 'MOBILITY_WALLET'
         }],
         application_context: {
-          return_url: `${process.env.BASE_URL || 'http://localhost:5001'}/api/payments/paypal/success`,
-          cancel_url: `${process.env.BASE_URL || 'http://localhost:5001'}/api/payments/paypal/cancel`,
+          return_url: `${process.env.BASE_URL || 'http://localhost:5001'}/api/wallet/paypal/success`,
+          cancel_url: `${process.env.BASE_URL || 'http://localhost:5001'}/api/wallet/paypal/cancel`,
           brand_name: 'Micro Mobility Platform',
           landing_page: 'BILLING',
           user_action: 'PAY_NOW',
